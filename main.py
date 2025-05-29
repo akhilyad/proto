@@ -1039,6 +1039,79 @@ def page_energy_conservation():
             st.session_state.smart_system_usage = 0.5
             st.experimental_rerun()
 
+def page_detailed_logistics_comparison():
+    st.header("Detailed Carbon & Logistics Cost Comparison")
+    st.write("Compare air freight vs. multi-modal (sea + rail) for a 20-foot container (TEU). All calculations use the latest model.")
+
+    # Inputs
+    payload_kg = st.number_input("Payload (kg)", min_value=1000.0, max_value=30000.0, value=20000.0, step=100.0)
+    air_distance_km = st.number_input("Air Distance (km)", min_value=100.0, max_value=20000.0, value=6100.0, step=100.0)
+    sea_distance_km = st.number_input("Sea Distance (km)", min_value=0.0, max_value=20000.0, value=6500.0, step=100.0)
+    rail_distance_km = st.number_input("Rail Distance (km)", min_value=0.0, max_value=20000.0, value=300.0, step=10.0)
+
+    if st.button("Compare Scenarios"):
+        from emissions import calculate_full_logistics_cost
+        air = calculate_full_logistics_cost(payload_kg, air_distance_km, 0, 0, scenario='air')
+        multi = calculate_full_logistics_cost(payload_kg, 0, sea_distance_km, rail_distance_km, scenario='multi-modal')
+        # Net savings
+        financial_savings = air['total_financial_cost'] - multi['total_financial_cost']
+        carbon_savings = air['carbon_cost'] - multi['carbon_cost']
+        net_savings = financial_savings + carbon_savings
+        # Table
+        data = {
+            'Metric': [
+                'Distance (km)',
+                'CO₂ Emissions (tons)',
+                'Direct Cost ($)',
+                'Lead Time (days)',
+                'Logistics Time Cost ($)',
+                'Inventory Holding Cost ($)',
+                'Total Lead Time Cost ($)',
+                'Total Financial Cost ($)',
+                'Carbon Cost ($)',
+                'Net Savings ($)'
+            ],
+            'Air Freight (Plane)': [
+                air_distance_km,
+                air['co2_tons'],
+                air['direct_cost'],
+                air['lead_time_days'],
+                air['logistics_time_cost'],
+                air['inventory_holding_cost'],
+                air['total_lead_time_cost'],
+                air['total_financial_cost'],
+                air['carbon_cost'],
+                ''
+            ],
+            'Multi-Modal (Sea + Rail)': [
+                sea_distance_km + rail_distance_km,
+                multi['co2_tons'],
+                multi['direct_cost'],
+                multi['lead_time_days'],
+                multi['logistics_time_cost'],
+                multi['inventory_holding_cost'],
+                multi['total_lead_time_cost'],
+                multi['total_financial_cost'],
+                multi['carbon_cost'],
+                net_savings
+            ],
+            'Difference (Air - Multi-Modal)': [
+                air_distance_km - (sea_distance_km + rail_distance_km),
+                air['co2_tons'] - multi['co2_tons'],
+                air['direct_cost'] - multi['direct_cost'],
+                air['lead_time_days'] - multi['lead_time_days'],
+                air['logistics_time_cost'] - multi['logistics_time_cost'],
+                air['inventory_holding_cost'] - multi['inventory_holding_cost'],
+                air['total_lead_time_cost'] - multi['total_lead_time_cost'],
+                air['total_financial_cost'] - multi['total_financial_cost'],
+                air['carbon_cost'] - multi['carbon_cost'],
+                ''
+            ]
+        }
+        df = pd.DataFrame(data)
+        st.dataframe(df, use_container_width=True)
+        st.success(f"Net Savings (including carbon): ${net_savings:,.2f}")
+
 def main():
     """Main application entry point."""
     initialize_page()
@@ -1058,6 +1131,7 @@ def main():
         "Sustainable Packaging": page_sustainable_packaging,
         "Efficient Load Management": page_efficient_load_management,
         "Energy Conservation": page_energy_conservation,
+        "Detailed Logistics Comparison": page_detailed_logistics_comparison,
     }
     
     pages = get_available_pages()
