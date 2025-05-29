@@ -1,0 +1,10 @@
+Local Testing:
+
+ Navigate | cd C:\Users\akhil\Desktop\Resume\C360-master |
+| Create venv | python -m venv venv |
+| Activate | .\venv\Scripts\Activate |
+| Upgrade pip | pip install --upgrade pip setuptools wheel |
+| Install reqs | pip install -r requirements.txt |
+| Run app | streamlit run main.py |
+| Stop app | Ctrl + C |
+| Deactivate | deactivate |

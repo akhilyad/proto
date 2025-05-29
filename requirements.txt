@@ -1,0 +1,17 @@
+geopy
+pip>=23.0
+setuptools>=65.0.0
+streamlit
+pandas==2.1.4
+numpy
+geopandas
+shapely
+folium
+plotly
+rapidfuzz==3.6.1
+PyYAML
+openrouteservice
+networkx
+streamlit-folium
+python-dotenv
+# Add any other dependencies you use below
