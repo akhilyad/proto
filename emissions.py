@@ -271,4 +271,68 @@ def fetch_carbon_price() -> float:
         
         return round(current_price, 2)
     except Exception as e:
-        raise ValueError(f"Error fetching carbon price: {str(e)}") 
+        raise ValueError(f"Error fetching carbon price: {str(e)}")
+
+
+def calculate_full_logistics_cost(
+    payload_kg: float,
+    air_distance_km: float,
+    sea_distance_km: float,
+    rail_distance_km: float,
+    scenario: str = 'air',
+) -> dict:
+    """
+    Calculate all logistics and carbon costs for air or multi-modal (sea+rail) shipping.
+    Returns a dictionary with all relevant metrics.
+    """
+    # Load parameters
+    ef = CONFIG['emission_factors']
+    costs = CONFIG['costs']
+    lead_times = CONFIG['lead_times']
+    carbon_price = CONFIG['carbon_price_usd_per_ton']
+    inventory_value = costs['inventory_value']
+    holding_rate = costs['inventory_holding_rate']
+    time_cost_per_day = costs['logistics_time_per_day']
+
+    payload_tons = payload_kg / 1000
+
+    if scenario == 'air':
+        # Emissions
+        co2_tons = payload_tons * air_distance_km * ef['Air'] / 1000
+        # Direct cost
+        direct_cost = payload_kg * costs['air_freight_per_kg']
+        # Lead time
+        lead_time_days = lead_times['air_days']
+    elif scenario == 'multi-modal':
+        # Emissions
+        co2_sea = payload_tons * sea_distance_km * ef['Sea'] / 1000
+        co2_rail = payload_tons * rail_distance_km * ef['Rail'] / 1000
+        co2_tons = co2_sea + co2_rail
+        # Direct cost
+        direct_cost = costs['sea_freight_per_teu'] + payload_kg * costs['rail_freight_per_kg']
+        # Lead time
+        lead_time_days = lead_times['multi_modal_days']
+    else:
+        raise ValueError('Invalid scenario')
+
+    # Logistics time cost
+    logistics_time_cost = lead_time_days * time_cost_per_day
+    # Inventory holding cost
+    inventory_holding_cost = inventory_value * holding_rate * (lead_time_days / 365)
+    # Total lead time cost
+    total_lead_time_cost = logistics_time_cost + inventory_holding_cost
+    # Total financial cost
+    total_financial_cost = direct_cost + total_lead_time_cost
+    # Carbon cost
+    carbon_cost = co2_tons * carbon_price
+
+    return {
+        'co2_tons': co2_tons,
+        'direct_cost': direct_cost,
+        'lead_time_days': lead_time_days,
+        'logistics_time_cost': logistics_time_cost,
+        'inventory_holding_cost': inventory_holding_cost,
+        'total_lead_time_cost': total_lead_time_cost,
+        'total_financial_cost': total_financial_cost,
+        'carbon_cost': carbon_cost,
+    } 
