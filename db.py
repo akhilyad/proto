@@ -77,8 +77,11 @@ def _return_connection(conn: sqlite3.Connection):
         conn.close()  # Close the connection if pool is full
 
 @contextmanager
-def get_db_connection() -> contextmanager[sqlite3.Connection]:
-    #Context manager for database connections using connection pool."""
+from typing import ContextManager  # Add this import at the top
+
+@contextmanager
+def get_db_connection() -> ContextManager[sqlite3.Connection]:
+    """Context manager for database connections using connection pool."""
     conn = None
     try:
         conn = _get_connection()
@@ -112,7 +115,6 @@ def get_db_connection() -> contextmanager[sqlite3.Connection]:
                     conn.close()
                 except Exception:
                     pass
-
 def insert_sample_suppliers():
     """Insert sample suppliers if the suppliers table is empty."""
     try:
