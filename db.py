@@ -1,6 +1,6 @@
 import sqlite3
 import logging
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List, Dict, Any, ContextManager  # Add this import at the top
 import pandas as pd
 import uuid
 import datetime
@@ -75,9 +75,6 @@ def _return_connection(conn: sqlite3.Connection):
         _connection_pool.put(conn, timeout=1)
     except Full:
         conn.close()  # Close the connection if pool is full
-
-@contextmanager
-from typing import ContextManager  # Add this import at the top
 
 @contextmanager
 def get_db_connection() -> ContextManager[sqlite3.Connection]:
