@@ -147,7 +147,7 @@ def init_db():
         with get_db_connection() as conn:
             c = conn.cursor()
             # Create tables with proper constraints and indexes
-            c.executescript(
+            c.executescript("""
                 CREATE TABLE IF NOT EXISTS emissions (
                     id TEXT PRIMARY KEY,
                     source TEXT NOT NULL,
@@ -214,7 +214,7 @@ def init_db():
                 BEGIN
                     UPDATE offsets SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
                 END;
-            )
+            """)
             conn.commit()
             logging.info("Database initialized successfully")
         # Insert sample suppliers if needed
