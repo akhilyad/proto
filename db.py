@@ -336,7 +336,7 @@ def get_suppliers(country: Optional[str] = None, city: Optional[str] = None, mat
                 conditions.append('created_at >= ?')
                 params.append(min_date)
             if conditions:
-                query += ' AND ' + ' + ' AND '.join(conditions)
+                query += ' AND ' + ' AND '.join(conditions)
             df = pd.read_sql_query(query, conn, params=params)
         return df
     except sqlite3.Error as e:
