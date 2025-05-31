@@ -92,23 +92,40 @@ def calculate_distance(
     return round(R * c, 2)
 
 
-def calculate_co2(transport_mode: str, distance_km: float, weight_tons: float) -> float:
-    """
-    Calculate CO2 emissions for a shipment.
-    """
+def calculate_co2(transport_mode: str, distance_km: float, weight_tons: float, vehicle_type: str = 'standard') -> float:
     if weight_tons <= 0:
         raise ValueError("Weight must be positive.")
     if distance_km <= 0:
         raise ValueError("Distance must be positive.")
-    emission_factor = EMISSION_FACTORS.get(transport_mode)
+    
+    emission_factors = {
+        'Truck': {
+            'standard': 0.096,
+            'electric': 0.020,
+            'biofuel': 0.050,
+            'hydrogen': 0.010
+        },
+        'Train': 0.028,
+        'Ship': 0.016,
+        'Plane': 0.602
+    }
+    
+    emission_factor = emission_factors.get(transport_mode, {}).get(vehicle_type, emission_factors.get(transport_mode))
     if emission_factor is None:
-        raise ValueError(f"Invalid transport mode: {transport_mode}")
+        raise ValueError(f"Invalid transport mode or vehicle type: {transport_mode}, {vehicle_type}")
+    
     co2_kg = distance_km * weight_tons * emission_factor
     return round(co2_kg, 2)
 
 
 def optimize_route(
-    country1: str, city1: str, country2: str, city2: str, distance_km: float, weight_tons: float, prioritize_green: bool = False
+    source_country: str, 
+    source_city: str, 
+    dest_country: str, 
+    dest_city: str, 
+    distance_km: float, 
+    weight_tons: float, 
+    prioritize_green: bool = False
 ) -> Tuple[Tuple[str, float, Optional[str], float], float, Tuple[float, float], Tuple[float, float], float]:
     """
     Optimize transport route to minimize CO2 emissions.
@@ -118,12 +135,14 @@ def optimize_route(
         raise ValueError("Weight must be positive.")
     if distance_km <= 0:
         raise ValueError("Distance must be positive.")
-    intercontinental = country1 != country2
+    
+    intercontinental = source_country != dest_country
     distance_short = distance_km < 1000
     distance_medium = 1000 <= distance_km < 5000
     distance_long = distance_km >= 5000
 
     current_co2 = distance_km * weight_tons * EMISSION_FACTORS['Truck']
+    
     combinations = []
     if intercontinental:
         if distance_long:
@@ -336,3 +355,29 @@ def calculate_full_logistics_cost(
         'total_financial_cost': total_financial_cost,
         'carbon_cost': carbon_cost,
     } 
+    
+def calculate_co2_with_load_factor(transport_mode: str, distance_km: float, weight_tons: float, vehicle_capacity_tons: float) -> float:
+    if weight_tons <= 0 or vehicle_capacity_tons <= 0:
+        raise ValueError("Weight and vehicle capacity must be positive.")
+    if distance_km <= 0:
+        raise ValueError("Distance must be positive.")
+    
+    load_factor = weight_tons / vehicle_capacity_tons
+    if load_factor > 1:
+        raise ValueError("Weight exceeds vehicle capacity.")
+    
+    emission_factors = {
+        'Truck': 0.096,
+        'Train': 0.028,
+        'Ship': 0.016,
+        'Plane': 0.602
+    }
+    
+    emission_factor = emission_factors.get(transport_mode)
+    if emission_factor is None:
+        raise ValueError(f"Invalid transport mode: {transport_mode}")
+    
+    adjusted_emission_factor = emission_factor / load_factor
+    
+    co2_kg = distance_km * weight_tons * adjusted_emission_factor
+    return round(co2_kg, 2)
