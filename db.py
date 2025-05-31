@@ -1,6 +1,6 @@
 import sqlite3
 import logging
-from typing import Optional, Tuple, List, Dict, Any, ContextManager  # Add this import at the top
+from typing import Optional, Tuple, List, Dict, Any, ContextManager  # Added ContextManager
 import pandas as pd
 import uuid
 import datetime
@@ -63,14 +63,14 @@ def _init_connection_pool():
             raise
 
 def _get_connection() -> sqlite3.Connection:
-    #Get a connection from the pool with timeout.
+    """Get a connection from the pool with timeout."""
     try:
         return _connection_pool.get(timeout=CONNECTION_TIMEOUT)
     except Empty:
         raise sqlite3.Error("No database connections available")
 
 def _return_connection(conn: sqlite3.Connection):
-    #Return a connection to the pool.
+    """Return a connection to the pool."""
     try:
         _connection_pool.put(conn, timeout=1)
     except Full:
@@ -112,6 +112,7 @@ def get_db_connection() -> ContextManager[sqlite3.Connection]:
                     conn.close()
                 except Exception:
                     pass
+
 def insert_sample_suppliers():
     """Insert sample suppliers if the suppliers table is empty."""
     try:
@@ -128,7 +129,7 @@ def insert_sample_suppliers():
                 ]
                 c.executemany('''
                     INSERT INTO suppliers (id, supplier_name, country, city, material, green_score, annual_capacity_tons, sustainable_practices)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''', suppliers)
                 conn.commit()
     except Exception as e:
@@ -240,7 +241,7 @@ def cleanup_old_records(retention_days: int = 365) -> None:
         logging.error(f"Database cleanup failed: {e}")
 
 def save_emission(source: str, destination: str, transport_mode: str, distance_km: float, co2_kg: float, weight_tons: float) -> None:
-    #""Save emission data with proper validation."""
+    """Save emission data with proper validation."""
     if not all([source, destination, transport_mode]):
         raise ValueError("All fields must be non-empty")
     if not all(isinstance(x, (int, float)) and x > 0 for x in [distance_km, co2_kg, weight_tons]):
@@ -252,7 +253,7 @@ def save_emission(source: str, destination: str, transport_mode: str, distance_k
             emission_id = str(uuid.uuid4())
             c.execute('''
                 INSERT INTO emissions (id, source, destination, transport_mode, distance_km, co2_kg, weight_tons)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (emission_id, source, destination, transport_mode, distance_km, co2_kg, weight_tons))
             conn.commit()
     except sqlite3.Error as e:
@@ -264,7 +265,7 @@ def save_packaging(material_type: str, weight_kg: float, co2_kg: float) -> None:
         with get_db_connection() as conn:
             c = conn.cursor()
             packaging_id = str(uuid.uuid4())
-            c.execute('INSERT INTO packaging (id, material_type, weight_kg, co2_kg) VALUES (?, ?, ?)',
+            c.execute('INSERT INTO packaging (id, material_type, weight_kg, co2_kg) VALUES (?, ?, ?, ?)',
                       (packaging_id, material_type, weight_kg, co2_kg))
             conn.commit()
     except sqlite3.Error as e:
@@ -275,14 +276,14 @@ def save_offset(project_type: str, co2_offset_tons: float, cost_usd: float) -> N
         with get_db_connection() as conn:
             c = conn.cursor()
             offset_id = str(uuid.uuid4())
-            c.execute('INSERT INTO offsets (id, project_type, co2_offset_tons, cost_usd) VALUES (?, ?, ?)',
+            c.execute('INSERT INTO offsets (id, project_type, co2_offset_tons, cost_usd) VALUES (?, ?, ?, ?)',
                       (offset_id, project_type, co2_offset_tons, cost_usd))
             conn.commit()
     except sqlite3.Error as e:
         logging.error(f"Failed to save offset: {e}")
 
 def get_emissions() -> pd.DataFrame:
-   # ""Get emissions data with proper error handling and type conversion."""
+    """Get emissions data with proper error handling and type conversion."""
     try:
         with get_db_connection() as conn:
             df = pd.read_sql_query('SELECT * FROM emissions', conn)
