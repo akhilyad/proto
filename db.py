@@ -1,6 +1,6 @@
 import sqlite3
 import logging
-from typing import Optional, Tuple, List, Dict, Any, ContextManager
+from typing import Optional, Tuple, List, Dict, Any
 import pandas as pd
 import uuid
 import datetime
@@ -14,16 +14,10 @@ import time
 import requests
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('app.log'),
-        logging.StreamHandler()
-    ]
-)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Load config
+# Load configuration
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 try:
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
@@ -45,6 +39,7 @@ _pool_lock = threading.Lock()
 
 def _init_connection_pool():
     """Initialize the connection pool with MAX_CONNECTIONS connections."""
+    global _connection_pool
     with _pool_lock:
         while not _connection_pool.empty():
             try:
@@ -59,8 +54,8 @@ def _init_connection_pool():
         try:
             conn = sqlite3.connect(DB_PATH, timeout=CONNECTION_TIMEOUT)
             conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")  # Use Write-Ahead Logging
-            conn.execute("PRAGMA synchronous=NORMAL")  # Faster writes
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA cache_size=-2000")  # Use 2MB cache
             _connection_pool.put(conn)
         except sqlite3.Error as e:
@@ -68,22 +63,22 @@ def _init_connection_pool():
             raise
 
 def _get_connection() -> sqlite3.Connection:
-    """Get a connection from the pool with timeout."""
+    #Get a connection from the pool with timeout.
     try:
         return _connection_pool.get(timeout=CONNECTION_TIMEOUT)
     except Empty:
         raise sqlite3.Error("No database connections available")
 
 def _return_connection(conn: sqlite3.Connection):
-    """Return a connection to the pool."""
+    #Return a connection to the pool.
     try:
         _connection_pool.put(conn, timeout=1)
-    except Queue.Full:
+    except Full:
         conn.close()  # Close the connection if pool is full
 
 @contextmanager
-def get_db_connection() -> ContextManager[sqlite3.Connection]:
-    """Context manager for database connections using connection pool."""
+def get_db_connection() -> contextmanager[sqlite3.Connection]:
+    #Context manager for database connections using connection pool."""
     conn = None
     try:
         conn = _get_connection()
@@ -134,7 +129,7 @@ def insert_sample_suppliers():
                 ]
                 c.executemany('''
                     INSERT INTO suppliers (id, supplier_name, country, city, material, green_score, annual_capacity_tons, sustainable_practices)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 ''', suppliers)
                 conn.commit()
     except Exception as e:
@@ -152,7 +147,7 @@ def init_db():
         with get_db_connection() as conn:
             c = conn.cursor()
             # Create tables with proper constraints and indexes
-            c.executescript('''
+            c.executescript(
                 CREATE TABLE IF NOT EXISTS emissions (
                     id TEXT PRIMARY KEY,
                     source TEXT NOT NULL,
@@ -219,7 +214,7 @@ def init_db():
                 BEGIN
                     UPDATE offsets SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
                 END;
-            ''')
+            )
             conn.commit()
             logging.info("Database initialized successfully")
         # Insert sample suppliers if needed
@@ -246,7 +241,7 @@ def cleanup_old_records(retention_days: int = 365) -> None:
         logging.error(f"Database cleanup failed: {e}")
 
 def save_emission(source: str, destination: str, transport_mode: str, distance_km: float, co2_kg: float, weight_tons: float) -> None:
-    """Save emission data with proper validation."""
+    #""Save emission data with proper validation."""
     if not all([source, destination, transport_mode]):
         raise ValueError("All fields must be non-empty")
     if not all(isinstance(x, (int, float)) and x > 0 for x in [distance_km, co2_kg, weight_tons]):
@@ -258,7 +253,7 @@ def save_emission(source: str, destination: str, transport_mode: str, distance_k
             emission_id = str(uuid.uuid4())
             c.execute('''
                 INSERT INTO emissions (id, source, destination, transport_mode, distance_km, co2_kg, weight_tons)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
             ''', (emission_id, source, destination, transport_mode, distance_km, co2_kg, weight_tons))
             conn.commit()
     except sqlite3.Error as e:
@@ -270,7 +265,7 @@ def save_packaging(material_type: str, weight_kg: float, co2_kg: float) -> None:
         with get_db_connection() as conn:
             c = conn.cursor()
             packaging_id = str(uuid.uuid4())
-            c.execute('INSERT INTO packaging (id, material_type, weight_kg, co2_kg) VALUES (?, ?, ?, ?)',
+            c.execute('INSERT INTO packaging (id, material_type, weight_kg, co2_kg) VALUES (?, ?, ?)',
                       (packaging_id, material_type, weight_kg, co2_kg))
             conn.commit()
     except sqlite3.Error as e:
@@ -281,14 +276,14 @@ def save_offset(project_type: str, co2_offset_tons: float, cost_usd: float) -> N
         with get_db_connection() as conn:
             c = conn.cursor()
             offset_id = str(uuid.uuid4())
-            c.execute('INSERT INTO offsets (id, project_type, co2_offset_tons, cost_usd) VALUES (?, ?, ?, ?)',
+            c.execute('INSERT INTO offsets (id, project_type, co2_offset_tons, cost_usd) VALUES (?, ?, ?)',
                       (offset_id, project_type, co2_offset_tons, cost_usd))
             conn.commit()
     except sqlite3.Error as e:
         logging.error(f"Failed to save offset: {e}")
 
 def get_emissions() -> pd.DataFrame:
-    """Get emissions data with proper error handling and type conversion."""
+   # ""Get emissions data with proper error handling and type conversion."""
     try:
         with get_db_connection() as conn:
             df = pd.read_sql_query('SELECT * FROM emissions', conn)
@@ -341,7 +336,7 @@ def get_suppliers(country: Optional[str] = None, city: Optional[str] = None, mat
                 conditions.append('created_at >= ?')
                 params.append(min_date)
             if conditions:
-                query += ' AND ' + ' AND '.join(conditions)
+                query += ' AND ' + ' + ' AND '.join(conditions)
             df = pd.read_sql_query(query, conn, params=params)
         return df
     except sqlite3.Error as e:
