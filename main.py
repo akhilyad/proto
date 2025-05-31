@@ -1,5 +1,5 @@
 import db
-db.init_db()
+import emissions
 import streamlit as st
 import pandas as pd
 import yaml
@@ -8,7 +8,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 import logging
 from streamlit_folium import st_folium
-import emissions
 import visualization
 import ui
 
@@ -34,6 +33,7 @@ if 'initialized' not in st.session_state:
     st.session_state.dest_country = next(iter(CONFIG['locations']))
     st.session_state.dest_city = next(iter(CONFIG['locations'][st.session_state.dest_country]))
     st.session_state.weight_tons = 1.0
+    st.session_state.vehicle_type = 'standard'
     st.session_state.initialized = True
 
 def initialize_page():
@@ -72,7 +72,7 @@ def with_spinner(func):
     return wrapper
 
 @with_spinner
-def calculate_emissions_with_progress(source_country, source_city, dest_country, dest_city, weight_tons):
+def calculate_emissions_with_progress(source_country, source_city, dest_country, dest_city, weight_tons, vehicle_type):
     """Calculate emissions with progress indicator."""
     progress_bar = st.progress(0)
     
@@ -86,7 +86,7 @@ def calculate_emissions_with_progress(source_country, source_city, dest_country,
         
         # Calculate CO2
         progress_bar.progress(50)
-        co2_kg = emissions.calculate_co2('Truck', distance_km, weight_tons)
+        co2_kg = emissions.calculate_co2('Truck', distance_km, weight_tons, vehicle_type)
         
         # Calculate additional metrics
         progress_bar.progress(75)
@@ -147,11 +147,11 @@ def page_calculate_emissions():
         # Update city if country changed
         if source_country != st.session_state.calc_source_country:
             st.session_state.calc_source_country = source_country
-            st.session_state.calc_source_city = list(CONFIG['locations'][source_country].keys())[0]
+            reset_calc_source_city()
         source_city = st.selectbox(
             "Source City",
             list(CONFIG['locations'][st.session_state.calc_source_country].keys()),
-            index=list(CONFIG['locations'][st.session_state.calc_source_country].keys()).index(st.session_state.calc_source_city) if st.session_state.calc_source_city in CONFIG['locations'][st.session_state.calc_source_country] else 0,
+            index=list(CONFIG['locations'][st.session_state.calc_source_country].keys()).index(st.session_state.calc_source_city),
             key="calc_source_city_selector"
         )
         st.session_state.calc_source_city = source_city
@@ -166,11 +166,11 @@ def page_calculate_emissions():
         # Update city if country changed
         if dest_country != st.session_state.calc_dest_country:
             st.session_state.calc_dest_country = dest_country
-            st.session_state.calc_dest_city = list(CONFIG['locations'][dest_country].keys())[0]
+            reset_calc_dest_city()
         dest_city = st.selectbox(
             "Destination City",
             list(CONFIG['locations'][st.session_state.calc_dest_country].keys()),
-            index=list(CONFIG['locations'][st.session_state.calc_dest_country].keys()).index(st.session_state.calc_dest_city) if st.session_state.calc_dest_city in CONFIG['locations'][st.session_state.calc_dest_country] else 0,
+            index=list(CONFIG['locations'][st.session_state.calc_dest_country].keys()).index(st.session_state.calc_dest_city),
             key="calc_dest_city_selector"
         )
         st.session_state.calc_dest_city = dest_city
@@ -214,7 +214,8 @@ def page_calculate_emissions():
                     st.session_state.calc_source_city,
                     st.session_state.calc_dest_country,
                     st.session_state.calc_dest_city,
-                    weight_tons
+                    weight_tons,
+                    st.session_state.vehicle_type
                 )
                 if results:
                     # Display results
@@ -237,7 +238,6 @@ def page_calculate_emissions():
                         results['co2_kg'],
                         weight_tons
                     )
-                    # Show map
                     # Show map
                     with st.spinner("Generating map..."):
                         m = visualization.render_emission_map(
@@ -1039,79 +1039,6 @@ def page_energy_conservation():
             st.session_state.smart_system_usage = 0.5
             st.experimental_rerun()
 
-def page_detailed_logistics_comparison():
-    st.header("Detailed Carbon & Logistics Cost Comparison")
-    st.write("Compare air freight vs. multi-modal (sea + rail) for a 20-foot container (TEU). All calculations use the latest model.")
-
-    # Inputs
-    payload_kg = st.number_input("Payload (kg)", min_value=1000.0, max_value=30000.0, value=20000.0, step=100.0)
-    air_distance_km = st.number_input("Air Distance (km)", min_value=100.0, max_value=20000.0, value=6100.0, step=100.0)
-    sea_distance_km = st.number_input("Sea Distance (km)", min_value=0.0, max_value=20000.0, value=6500.0, step=100.0)
-    rail_distance_km = st.number_input("Rail Distance (km)", min_value=0.0, max_value=20000.0, value=300.0, step=10.0)
-
-    if st.button("Compare Scenarios"):
-        from emissions import calculate_full_logistics_cost
-        air = calculate_full_logistics_cost(payload_kg, air_distance_km, 0, 0, scenario='air')
-        multi = calculate_full_logistics_cost(payload_kg, 0, sea_distance_km, rail_distance_km, scenario='multi-modal')
-        # Net savings
-        financial_savings = air['total_financial_cost'] - multi['total_financial_cost']
-        carbon_savings = air['carbon_cost'] - multi['carbon_cost']
-        net_savings = financial_savings + carbon_savings
-        # Table
-        data = {
-            'Metric': [
-                'Distance (km)',
-                'CO₂ Emissions (tons)',
-                'Direct Cost ($)',
-                'Lead Time (days)',
-                'Logistics Time Cost ($)',
-                'Inventory Holding Cost ($)',
-                'Total Lead Time Cost ($)',
-                'Total Financial Cost ($)',
-                'Carbon Cost ($)',
-                'Net Savings ($)'
-            ],
-            'Air Freight (Plane)': [
-                air_distance_km,
-                air['co2_tons'],
-                air['direct_cost'],
-                air['lead_time_days'],
-                air['logistics_time_cost'],
-                air['inventory_holding_cost'],
-                air['total_lead_time_cost'],
-                air['total_financial_cost'],
-                air['carbon_cost'],
-                ''
-            ],
-            'Multi-Modal (Sea + Rail)': [
-                sea_distance_km + rail_distance_km,
-                multi['co2_tons'],
-                multi['direct_cost'],
-                multi['lead_time_days'],
-                multi['logistics_time_cost'],
-                multi['inventory_holding_cost'],
-                multi['total_lead_time_cost'],
-                multi['total_financial_cost'],
-                multi['carbon_cost'],
-                net_savings
-            ],
-            'Difference (Air - Multi-Modal)': [
-                air_distance_km - (sea_distance_km + rail_distance_km),
-                air['co2_tons'] - multi['co2_tons'],
-                air['direct_cost'] - multi['direct_cost'],
-                air['lead_time_days'] - multi['lead_time_days'],
-                air['logistics_time_cost'] - multi['logistics_time_cost'],
-                air['inventory_holding_cost'] - multi['inventory_holding_cost'],
-                air['total_lead_time_cost'] - multi['total_lead_time_cost'],
-                air['total_financial_cost'] - multi['total_financial_cost'],
-                air['carbon_cost'] - multi['carbon_cost'],
-                ''
-            ]
-        }
-        df = pd.DataFrame(data)
-        st.dataframe(df, use_container_width=True)
-        st.success(f"Net Savings (including carbon): ${net_savings:,.2f}")
-
 def main():
     """Main application entry point."""
     initialize_page()
@@ -1131,7 +1058,6 @@ def main():
         "Sustainable Packaging": page_sustainable_packaging,
         "Efficient Load Management": page_efficient_load_management,
         "Energy Conservation": page_energy_conservation,
-        "Detailed Logistics Comparison": page_detailed_logistics_comparison,
     }
     
     pages = get_available_pages()
@@ -1146,4 +1072,4 @@ def main():
         st.stop()
 
 if __name__ == "__main__":
-    main() 
+    main()
