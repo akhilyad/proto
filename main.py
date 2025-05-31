@@ -11,6 +11,13 @@ from streamlit_folium import st_folium
 import visualization
 import ui
 
+required_keys = ['emission_factors', 'packaging_emissions', 'packaging_costs', 'exchange_rates', 'locations', 'carbon_price_eur_per_ton', 'carbon_price_usd_per_ton']
+missing_keys = [key for key in required_keys if key not in CONFIG]
+if missing_keys:
+    logger.error(f"Missing required config keys: {missing_keys}")
+    st.error(f"Configuration error: missing keys {missing_keys}")
+    st.stop()
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
