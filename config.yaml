@@ -6,9 +6,6 @@ emission_factors:
   Electric Truck: 0.020
   Biofuel Truck: 0.050
   Hydrogen Truck: 0.010
-  Air: 0.602
-  Sea: 0.016
-  Rail: 0.022
 
 packaging_emissions:
   Plastic: 6.0
@@ -21,11 +18,6 @@ packaging_costs:
   Cardboard: 0.8
   Biodegradable: 2.0
   Reusable: 3.0
-
-offset_costs:
-  Reforestation: 15.0
-  Renewable Energy: 20.0
-  Methane Capture: 18.0
 
 exchange_rates:
   EUR: 1.0
@@ -355,17 +347,5 @@ locations:
       lat: 31.2653
       lon: 32.3019
 
-costs:
-  air_freight_per_kg: 5
-  sea_freight_per_teu: 2500
-  rail_freight_per_kg: 0.05
-  logistics_time_per_day: 500
-  inventory_value: 100000
-  inventory_holding_rate: 0.2
-
-lead_times:
-  air_days: 2
-  multi_modal_days: 13
-
 carbon_price_eur_per_ton: 65.89
-carbon_price_usd_per_ton: 100
+carbon_price_usd_per_ton: 69.84
