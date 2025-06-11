@@ -225,10 +225,10 @@ def page_calculate_emissions():
                     st.session_state.calc_dest_country,
                     st.session_state.calc_dest_city,
                     weight_tons,
-                    transport_mode  # Added transport_mode to the call
+                    transport_mode
                 )
-                if results:
-                    # Additional save (optional, as it's already done in the function)
+                # Safely handle results
+                if results and isinstance(results, dict):
                     db.save_emission(
                         f"{st.session_state.calc_source_city}, {st.session_state.calc_source_country}",
                         f"{st.session_state.calc_dest_city}, {st.session_state.calc_dest_country}",
@@ -237,6 +237,8 @@ def page_calculate_emissions():
                         results['co2_kg'],
                         weight_tons
                     )
+                else:
+                    st.warning("Calculation did not return valid results. Please try again.")
             except Exception as e:
                 logger.error(f"Error in emissions calculation: {e}")
                 st.error(f"An error occurred: {str(e)}")
