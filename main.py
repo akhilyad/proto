@@ -10,7 +10,6 @@ from streamlit_folium import st_folium
 import emissions
 import visualization
 import ui
-from scipy.optimize import linprog  # NEW: For linear programming
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
