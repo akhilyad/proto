@@ -12,6 +12,8 @@ import threading
 from queue import Queue, Empty, Full
 import time
 import requests
+import psycopg2
+from emissions import CONFIG
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -367,9 +369,17 @@ def geocode_location(city, country):
         return float(data["lat"]), float(data["lon"])
     return None
 
-def get_coordinates(country, city):
-    coords = _get_coordinates_from_config(country, city)
-    if coords:
-        return coords
-    # Fallback to geocoding
-    return geocode_location(city, country)
+def get_coordinates(country: str, city: str) -> tuple:
+    try:
+        # Attempt database connection
+        conn = psycopg2.connect(os.environ['DATABASE_URL'])
+        cursor = conn.cursor()
+        cursor.execute("SELECT latitude, longitude FROM coordinates WHERE country = %s AND city = %s", (country, city))
+        result = cursor.fetchone()
+        conn.close()
+        if result:
+            return float(result[0]), float(result[1])
+    except (psycopg2.Error, KeyError):
+        # Fallback to config if database fails
+        return _get_coordinates_from_config(country, city)
+    return None
