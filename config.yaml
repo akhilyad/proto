@@ -23,3 +23,14 @@ offset_costs:
   tree_planting: 10.0
   renewable_energy: 15.0
   carbon_credits: 12.0
+carbon_price_usd_per_ton: 55.0  # Added for calculate_full_logistics_cost
+costs:  # Added for calculate_full_logistics_cost
+  air_freight_per_kg: 2.5
+  sea_freight_per_teu: 1000.0
+  rail_freight_per_kg: 0.1
+  inventory_value: 100000.0
+  inventory_holding_rate: 0.2
+  logistics_time_per_day: 500.0
+lead_times:  # Added for calculate_full_logistics_cost
+  air_days: 2.0
+  multi_modal_days: 10.0
