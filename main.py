@@ -72,6 +72,7 @@ def with_spinner(func):
 
 @with_spinner
 def calculate_emissions_with_progress(source_country, source_city, dest_country, dest_city, weight_tons, transport_mode):
+    """Calculate emissions with progress indicator and return results."""
     progress_bar = st.progress(0)
     try:
         progress_bar.progress(25)
@@ -84,11 +85,39 @@ def calculate_emissions_with_progress(source_country, source_city, dest_country,
         carbon_cost_eur = co2_kg * (CONFIG['carbon_price_eur_per_ton'] / 1000)  # Convert kg to tons
         trees_offset = int(co2_kg / 25)  # Assuming 25 kg CO2 per tree
         # Save emission (will fall back if no database)
-        db.save_emission(source_country, source_city, dest_country, dest_city, transport_mode, weight_tons, co2_kg, distance_km, carbon_cost_eur, trees_offset)
-        # ... (rest of the function, e.g., display results)
+        db.save_emission(f"{source_city}, {source_country}", f"{dest_city}, {dest_country}", transport_mode, distance_km, co2_kg, weight_tons)
+        # Display results
+        st.subheader("Emission Results")
+        col5, col6, col7, col8 = st.columns(4)
+        with col5:
+            st.metric("CO2 Emissions", f"{co2_kg:.2f} kg")
+        with col6:
+            st.metric("Carbon Cost (EUR)", f"{carbon_cost_eur:.2f}")
+        with col7:
+            st.metric("Distance", f"{distance_km:.2f} km")
+        with col8:
+            st.metric("Trees to Offset", f"{trees_offset}")
+        # Map rendering
+        with st.spinner("Generating map..."):
+            m = visualization.render_emission_map(
+                pd.DataFrame([{
+                    'source_country': source_country,
+                    'source_city': source_city,
+                    'dest_country': dest_country,
+                    'dest_city': dest_city,
+                    'source': f"{source_city}, {source_country}",
+                    'destination': f"{dest_city}, {dest_country}",
+                    'co2_kg': co2_kg
+                }]),
+                db.get_coordinates,
+                max_routes=1
+            )
+            st_folium(m, width=900, height=400)
+        return {'co2_kg': co2_kg, 'carbon_cost_eur': carbon_cost_eur, 'distance_km': distance_km, 'trees_equivalent': trees_offset}
     except Exception as e:
         logger.error(f"Error in emissions calculation: {e}")
         st.error(f"An error occurred: {e}")
+        return None
     finally:
         progress_bar.empty()
 
@@ -195,19 +224,11 @@ def page_calculate_emissions():
                     st.session_state.calc_source_city,
                     st.session_state.calc_dest_country,
                     st.session_state.calc_dest_city,
-                    weight_tons
+                    weight_tons,
+                    transport_mode  # Added transport_mode to the call
                 )
                 if results:
-                    st.subheader("Emission Results")
-                    col5, col6, col7, col8 = st.columns(4)
-                    with col5:
-                        st.metric("CO2 Emissions", f"{results['co2_kg']:.2f} kg")
-                    with col6:
-                        st.metric("Carbon Cost (EUR)", f"{results['carbon_cost_eur']:.2f}")
-                    with col7:
-                        st.metric("Distance", f"{results['distance_km']:.2f} km")
-                    with col8:
-                        st.metric("Trees to Offset", f"{int(results['trees_equivalent'])}")
+                    # Additional save (optional, as it's already done in the function)
                     db.save_emission(
                         f"{st.session_state.calc_source_city}, {st.session_state.calc_source_country}",
                         f"{st.session_state.calc_dest_city}, {st.session_state.calc_dest_country}",
@@ -216,21 +237,6 @@ def page_calculate_emissions():
                         results['co2_kg'],
                         weight_tons
                     )
-                    with st.spinner("Generating map..."):
-                        m = visualization.render_emission_map(
-                            pd.DataFrame([{
-                                'source_country': st.session_state.calc_source_country,
-                                'source_city': st.session_state.calc_source_city,
-                                'dest_country': st.session_state.calc_dest_country,
-                                'dest_city': st.session_state.calc_dest_city,
-                                'source': f"{st.session_state.calc_source_city}, {st.session_state.calc_source_country}",
-                                'destination': f"{st.session_state.calc_dest_city}, {st.session_state.calc_dest_country}",
-                                'co2_kg': results['co2_kg']
-                            }]),
-                            db.get_coordinates,
-                            max_routes=1
-                        )
-                        st_folium(m, width=900, height=400) 
             except Exception as e:
                 logger.error(f"Error in emissions calculation: {e}")
                 st.error(f"An error occurred: {str(e)}")
@@ -446,7 +452,7 @@ def page_supplier_lookup():
                         if not local_suppliers.empty:
                             potential_savings = current_co2
                             st.success(
-                                f"🌍 **Local Sourcing Opportunity**: Source from {dest_country} to save {potential_savings:.2f} kg CO2."
+                                f"ðŸŒ� **Local Sourcing Opportunity**: Source from {dest_country} to save {potential_savings:.2f} kg CO2."
                             )
                         else:
                             st.info(f"No suppliers found in {dest_country}.")
