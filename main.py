@@ -1,5 +1,4 @@
 import db
-import emissions
 import streamlit as st
 import pandas as pd
 import yaml
@@ -8,15 +7,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 import logging
 from streamlit_folium import st_folium
+import emissions
 import visualization
 import ui
-
-required_keys = ['emission_factors', 'packaging_emissions', 'packaging_costs', 'exchange_rates', 'locations', 'carbon_price_eur_per_ton', 'carbon_price_usd_per_ton']
-missing_keys = [key for key in required_keys if key not in CONFIG]
-if missing_keys:
-    logger.error(f"Missing required config keys: {missing_keys}")
-    st.error(f"Configuration error: missing keys {missing_keys}")
-    st.stop()
+from scipy.optimize import linprog  # NEW: For linear programming
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -40,7 +34,6 @@ if 'initialized' not in st.session_state:
     st.session_state.dest_country = next(iter(CONFIG['locations']))
     st.session_state.dest_city = next(iter(CONFIG['locations'][st.session_state.dest_country]))
     st.session_state.weight_tons = 1.0
-    st.session_state.vehicle_type = 'standard'
     st.session_state.initialized = True
 
 def initialize_page():
@@ -79,7 +72,7 @@ def with_spinner(func):
     return wrapper
 
 @with_spinner
-def calculate_emissions_with_progress(source_country, source_city, dest_country, dest_city, weight_tons, vehicle_type):
+def calculate_emissions_with_progress(source_country, source_city, dest_country, dest_city, weight_tons):
     """Calculate emissions with progress indicator."""
     progress_bar = st.progress(0)
     
@@ -93,7 +86,7 @@ def calculate_emissions_with_progress(source_country, source_city, dest_country,
         
         # Calculate CO2
         progress_bar.progress(50)
-        co2_kg = emissions.calculate_co2('Truck', distance_km, weight_tons, vehicle_type)
+        co2_kg = emissions.calculate_co2('Truck', distance_km, weight_tons)
         
         # Calculate additional metrics
         progress_bar.progress(75)
@@ -151,14 +144,13 @@ def page_calculate_emissions():
             index=list(CONFIG['locations'].keys()).index(st.session_state.calc_source_country),
             key="calc_source_country_selector"
         )
-        # Update city if country changed
         if source_country != st.session_state.calc_source_country:
             st.session_state.calc_source_country = source_country
-            reset_calc_source_city()
+            st.session_state.calc_source_city = list(CONFIG['locations'][source_country].keys())[0]
         source_city = st.selectbox(
             "Source City",
             list(CONFIG['locations'][st.session_state.calc_source_country].keys()),
-            index=list(CONFIG['locations'][st.session_state.calc_source_country].keys()).index(st.session_state.calc_source_city),
+            index=list(CONFIG['locations'][st.session_state.calc_source_country].keys()).index(st.session_state.calc_source_city) if st.session_state.calc_source_city in CONFIG['locations'][st.session_state.calc_source_country] else 0,
             key="calc_source_city_selector"
         )
         st.session_state.calc_source_city = source_city
@@ -170,14 +162,13 @@ def page_calculate_emissions():
             index=list(CONFIG['locations'].keys()).index(st.session_state.calc_dest_country),
             key="calc_dest_country_selector"
         )
-        # Update city if country changed
         if dest_country != st.session_state.calc_dest_country:
             st.session_state.calc_dest_country = dest_country
-            reset_calc_dest_city()
+            st.session_state.calc_dest_city = list(CONFIG['locations'][dest_country].keys())[0]
         dest_city = st.selectbox(
             "Destination City",
             list(CONFIG['locations'][st.session_state.calc_dest_country].keys()),
-            index=list(CONFIG['locations'][st.session_state.calc_dest_country].keys()).index(st.session_state.calc_dest_city),
+            index=list(CONFIG['locations'][st.session_state.calc_dest_country].keys()).index(st.session_state.calc_dest_city) if st.session_state.calc_dest_city in CONFIG['locations'][st.session_state.calc_dest_country] else 0,
             key="calc_dest_city_selector"
         )
         st.session_state.calc_dest_city = dest_city
@@ -203,29 +194,24 @@ def page_calculate_emissions():
         submitted = st.form_submit_button("Calculate Emissions")
         if submitted:
             try:
-                # Update session state
                 st.session_state.calc_source_country = source_country
                 st.session_state.calc_source_city = source_city
                 st.session_state.calc_dest_country = dest_country
                 st.session_state.calc_dest_city = dest_city
                 st.session_state.weight_tons = weight_tons
-                # Store for optimized route planning
                 st.session_state['last_source_country'] = source_country
                 st.session_state['last_source_city'] = source_city
                 st.session_state['last_dest_country'] = dest_country
                 st.session_state['last_dest_city'] = dest_city
                 st.session_state['last_weight_tons'] = weight_tons
-                # Calculate emissions with progress
                 results = calculate_emissions_with_progress(
                     st.session_state.calc_source_country,
                     st.session_state.calc_source_city,
                     st.session_state.calc_dest_country,
                     st.session_state.calc_dest_city,
-                    weight_tons,
-                    st.session_state.vehicle_type
+                    weight_tons
                 )
                 if results:
-                    # Display results
                     st.subheader("Emission Results")
                     col5, col6, col7, col8 = st.columns(4)
                     with col5:
@@ -236,7 +222,6 @@ def page_calculate_emissions():
                         st.metric("Distance", f"{results['distance_km']:.2f} km")
                     with col8:
                         st.metric("Trees to Offset", f"{int(results['trees_equivalent'])}")
-                    # Save to database
                     db.save_emission(
                         f"{st.session_state.calc_source_city}, {st.session_state.calc_source_country}",
                         f"{st.session_state.calc_dest_city}, {st.session_state.calc_dest_country}",
@@ -245,7 +230,6 @@ def page_calculate_emissions():
                         results['co2_kg'],
                         weight_tons
                     )
-                    # Show map
                     with st.spinner("Generating map..."):
                         m = visualization.render_emission_map(
                             pd.DataFrame([{
@@ -270,13 +254,11 @@ def page_route_visualizer():
     try:
         emissions_df = db.get_emissions()
         if not emissions_df.empty:
-            # Extract source/destination country/city
             emissions_df['source_country'] = emissions_df['source'].apply(lambda x: x.split(', ')[1])
             emissions_df['source_city'] = emissions_df['source'].apply(lambda x: x.split(', ')[0])
             emissions_df['dest_country'] = emissions_df['destination'].apply(lambda x: x.split(', ')[1])
             emissions_df['dest_city'] = emissions_df['destination'].apply(lambda x: x.split(', ')[0])
 
-            
             with st.spinner("Loading map..."):
                 m = visualization.render_emission_map(emissions_df, db.get_coordinates)
                 st_folium(m, width=1200, height=600)
@@ -298,13 +280,32 @@ def page_route_visualizer():
             weight_tons = row['weight_tons']
             current_co2 = row['co2_kg']
             current_mode = row['transport_mode']
+            max_delivery_days = st.number_input(
+                "Max Delivery Days (Optional)",
+                min_value=0.0,
+                max_value=30.0,
+                value=0.0,
+                step=0.1,
+                help="Set maximum delivery time in days (0 for no constraint)."
+            )
+            cost_weight = st.slider(
+                "Cost vs CO2 Priority",
+                0.0,
+                1.0,
+                0.2,
+                help="0 = Prioritize CO2 reduction, 1 = Prioritize cost."
+            )
             try:
-                best_option, min_co2, breakdown, distances, _ = emissions.optimize_route(
-                    source_country, source_city, dest_country, dest_city, distance_km, weight_tons, prioritize_green=True
+                # NEW: Optimized route with flight option and cost consideration
+                best_option, min_co2, breakdown, distances, costs, delivery_time = emissions.optimize_route_advanced(
+                    source_country, source_city, dest_country, dest_city, distance_km, weight_tons,
+                    max_delivery_days=max_delivery_days if max_delivery_days > 0 else None,
+                    cost_weight=cost_weight
                 )
-                mode1, ratio1, mode2, ratio2 = best_option
-                co2_1, co2_2 = breakdown
-                dist1, dist2 = distances
+                modes, ratios = best_option
+                co2_values = breakdown
+                dist_values = distances
+                cost_values = costs
                 savings = current_co2 - min_co2
                 savings_pct = (savings / current_co2 * 100) if current_co2 != 0 else 0
 
@@ -313,44 +314,44 @@ def page_route_visualizer():
                     'source': {'country': source_country, 'city': source_city},
                     'destination': {'country': dest_country, 'city': dest_city},
                     'total_distance': distance_km,
+                    'total_co2': min_co2,
+                    'total_cost': sum(cost_values),
+                    'delivery_time': delivery_time,
                     'segments': [
                         {
-                            'mode': mode1,
-                            'ratio': ratio1,
-                            'co2': co2_1
+                            'mode': mode,
+                            'ratio': ratio,
+                            'distance': dist,
+                            'co2': co2_val,
+                            'cost': cost_val
                         }
+                        for mode, ratio, dist, co2_val, cost_val in zip(modes, ratios, dist_values, co2_values, cost_values)
+                        if ratio > 0
                     ]
                 }
-                if mode2:  # If there's a second transport mode
-                    route_data['segments'].append({
-                        'mode': mode2,
-                        'ratio': ratio2,
-                        'co2': co2_2
-                    })
 
                 # Render multi-modal route visualization
-                m = visualization.render_multi_modal_route(route_data, db.get_coordinates)
-                st_folium(m, width=1200, height=600)
+                with st.spinner("Rendering optimized route..."):
+                    m = visualization.render_multi_modal_route(route_data, db.get_coordinates)
+                    st_folium(m, width=1200, height=600)
 
                 st.subheader("Key Performance Indicators (KPIs)")
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("Total Distance", f"{distance_km:.2f} km")
                 with col2:
-                    st.metric("Current CO2 Emissions", f"{current_co2:.2f} kg")
-                with col3:
                     st.metric("Optimized CO2 Emissions", f"{min_co2:.2f} kg")
-                with col4:
+                with col3:
                     st.metric("CO2 Savings", f"{savings:.2f} kg ({savings_pct:.1f}% reduction)")
+                with col4:
+                    st.metric("Total Cost (USD)", f"{sum(cost_values):.2f}")
 
-                tab1, tab2 = st.tabs(["Route Breakdown", "Comparison Chart"])
+                tab1, tab2, tab3 = st.tabs(["Route Breakdown", "Comparison Chart", "Mode Contribution"])
                 with tab1:
                     st.write("**Optimized Route Breakdown**")
-                    if mode2:
-                        st.write(f"- **{mode1}**: {dist1:.2f} km, CO2: {co2_1:.2f} kg")
-                        st.write(f"- **{mode2}**: {dist2:.2f} km, CO2: {co2_2:.2f} kg")
-                    else:
-                        st.write(f"- **{mode1}**: {distance_km:.2f} km, CO2: {co2_1:.2f} kg")
+                    for seg in route_data['segments']:
+                        st.write(f"- **{seg['mode']}**: {seg['distance']:.2f} km, CO2: {seg['co2']:.2f} kg, Cost: ${seg['cost']:.2f}")
+                    st.write(f"**Delivery Time**: {delivery_time:.2f} days")
                 with tab2:
                     import plotly.graph_objects as go
                     fig = go.Figure()
@@ -362,7 +363,7 @@ def page_route_visualizer():
                         marker_color=['#FF4B4B', '#36A2EB']
                     ))
                     fig.add_trace(go.Bar(
-                        x=[distance_km, dist1 if not mode2 else dist1 + dist2],
+                        x=[distance_km, sum(dist_values)],
                         y=['Current Route', 'Optimized Route'],
                         orientation='h',
                         name='Distance (km)',
@@ -371,6 +372,14 @@ def page_route_visualizer():
                     fig.update_layout(
                         title="Current vs Optimized Route Comparison",
                         barmode='group'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                with tab3:
+                    import plotly.express as px
+                    fig = px.pie(
+                        values=[seg['co2'] for seg in route_data['segments']],
+                        names=[seg['mode'] for seg in route_data['segments']],
+                        title="CO2 Contribution by Mode"
                     )
                     st.plotly_chart(fig, use_container_width=True)
             except ValueError as e:
@@ -433,7 +442,6 @@ def page_supplier_lookup():
                 st.metric("Average Green Score", f"{suppliers['green_score'].mean():.1f}")
             with col6:
                 st.metric("Total Capacity", f"{suppliers['annual_capacity_tons'].sum():,} tons")
-            # Potential CO2 savings (if local supplier exists)
             potential_savings = 0
             if 'source_country' in st.session_state and 'dest_country' in st.session_state:
                 source_country = st.session_state.source_country
@@ -503,12 +511,14 @@ def page_reports():
                 current_co2 = row['co2_kg']
                 current_mode = row['transport_mode']
                 try:
-                    best_option, min_co2, breakdown, distances, _ = emissions.optimize_route(
-                        source_country, source_city, dest_country, dest_city, distance_km, weight_tons, prioritize_green=True
+                    best_option, min_co2, breakdown, distances, costs, delivery_time = emissions.optimize_route_advanced(
+                        source_country, source_city, dest_country, dest_city, distance_km, weight_tons,
+                        max_delivery_days=None, cost_weight=0.2
                     )
-                    mode1, ratio1, mode2, ratio2 = best_option
-                    co2_1, co2_2 = breakdown
-                    dist1, dist2 = distances
+                    modes, ratios = best_option
+                    co2_values = breakdown
+                    dist_values = distances
+                    cost_values = costs
                     savings = current_co2 - min_co2
                     total_savings += savings
                     route_data.append({
@@ -516,9 +526,10 @@ def page_reports():
                         'Old Mode': current_mode,
                         'Old Distance': distance_km,
                         'Old CO2': current_co2,
-                        'New Modes': f"{mode1} + {mode2 if mode2 else 'None'}",
-                        'New Distances': f"{dist1:.2f} km ({mode1}) + {dist2:.2f} km ({mode2 if mode2 else 'N/A'})",
+                        'New Modes': ' + '.join([m for m, r in zip(modes, ratios) if r > 0]),
+                        'New Distances': ' + '.join([f"{d:.2f} km ({m})" for m, d, r in zip(modes, dist_values, ratios) if r > 0]),
                         'New CO2': min_co2,
+                        'New Cost': sum(cost_values),
                         'Savings': savings
                     })
                 except Exception as e:
@@ -574,7 +585,6 @@ def page_optimized_route_planning():
     st.header("Optimized Route Planning")
     LOCATIONS = CONFIG['locations']
     CARBON_PRICE_EUR_PER_TON = CONFIG['carbon_price_eur_per_ton']
-    # Use last_* values from Calculate Emissions if available
     if 'last_source_country' in st.session_state:
         default_source_country = st.session_state['last_source_country']
     else:
@@ -595,7 +605,6 @@ def page_optimized_route_planning():
         default_weight_tons = st.session_state['last_weight_tons']
     else:
         default_weight_tons = 1.0
-    # Robust session state defaults for optimized route planning
     if 'opt_source_country' not in st.session_state:
         st.session_state['opt_source_country'] = default_source_country
     if 'opt_source_city' not in st.session_state or st.session_state['opt_source_city'] not in LOCATIONS[st.session_state['opt_source_country']]:
@@ -651,12 +660,22 @@ def page_optimized_route_planning():
             step=0.1,
             help="Enter the shipment weight in tons."
         )
-        st.session_state.weight_tons = weight_tons
-        prioritize_green = st.checkbox(
-            "Prioritize Green Vehicles",
-            value=True,
-            help="Use eco-friendly transport modes (e.g., Electric Truck, Hydrogen Truck)."
+        max_delivery_days = st.number_input(
+            "Max Delivery Days (Optional)",
+            min_value=0.0,
+            max_value=30.0,
+            value=0.0,
+            step=0.1,
+            help="Set maximum delivery time in days (0 for no constraint)."
         )
+        cost_weight = st.slider(
+            "Cost vs CO2 Priority",
+            0.0,
+            1.0,
+            0.2,
+            help="0 = Prioritize CO2 reduction, 1 = Prioritize cost."
+        )
+        st.session_state.weight_tons = weight_tons
         try:
             distance_km = emissions.calculate_distance(
                 st.session_state.opt_source_country,
@@ -671,22 +690,24 @@ def page_optimized_route_planning():
             distance_km = 0.0
     if st.button("Optimize Route") and distance_km > 0:
         try:
-            best_option, min_co2, breakdown, distances, current_co2 = emissions.optimize_route(
+            best_option, min_co2, breakdown, distances, costs, delivery_time = emissions.optimize_route_advanced(
                 st.session_state.opt_source_country,
                 st.session_state.opt_source_city,
                 st.session_state.opt_dest_country,
                 st.session_state.opt_dest_city,
-                distance_km, weight_tons, prioritize_green
+                distance_km, weight_tons,
+                max_delivery_days=max_delivery_days if max_delivery_days > 0 else None,
+                cost_weight=cost_weight
             )
-            mode1, ratio1, mode2, ratio2 = best_option
-            co2_1, co2_2 = breakdown
-            dist1, dist2 = distances
-            savings = current_co2 - min_co2
-            savings_pct = (savings / current_co2 * 100) if current_co2 != 0 else 0
+            modes, ratios = best_option
+            co2_values = breakdown
+            dist_values = distances
+            cost_values = costs
+            savings = emissions.calculate_co2('Truck', distance_km, weight_tons) - min_co2
+            savings_pct = (savings / min_co2 * 100) if min_co2 != 0 else 0
             cost_savings_eur = savings / 1000 * CARBON_PRICE_EUR_PER_TON
             trees_equivalent = savings * 0.04
-          
-            # Build route_data for multi-modal visualization
+
             route_data = {
                 'source': {
                     'country': st.session_state.opt_source_country,
@@ -695,10 +716,26 @@ def page_optimized_route_planning():
                 'destination': {
                     'country': st.session_state.opt_dest_country,
                     'city': st.session_state.opt_dest_city
-                }
+                },
+                'total_distance': distance_km,
+                'total_co2': min_co2,
+                'total_cost': sum(cost_values),
+                'delivery_time': delivery_time,
+                'segments': [
+                    {
+                        'mode': mode,
+                        'ratio': ratio,
+                        'distance': dist,
+                        'co2': co2_val,
+                        'cost': cost_val
+                    }
+                    for mode, ratio, dist, co2_val, cost_val in zip(modes, ratios, dist_values, co2_values, cost_values)
+                    if ratio > 0
+                ]
             }
-            m = visualization.render_multi_modal_route(route_data, db.get_coordinates)
-            st_folium(m, width=900, height=400)
+            with st.spinner("Rendering optimized route..."):
+                m = visualization.render_multi_modal_route(route_data, db.get_coordinates)
+                st_folium(m, width=900, height=400)
             st.subheader("Optimization Results")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -708,39 +745,35 @@ def page_optimized_route_planning():
             with col3:
                 st.metric("Cost Savings (EUR)", f"{cost_savings_eur:.2f}")
             with col4:
-                st.metric("Trees Equivalent", f"{int(trees_equivalent)}")
+                st.metric("Delivery Time", f"{delivery_time:.2f} days")
             tab1, tab2, tab3 = st.tabs(["Route Breakdown", "CO2 Comparison", "Mode Contribution"])
             with tab1:
                 st.write("**Optimized Route Breakdown**")
-                if mode2:
-                    st.write(f"- **{mode1}**: {dist1:.2f} km, CO2: {co2_1:.2f} kg")
-                    st.write(f"- **{mode2}**: {dist2:.2f} km, CO2: {co2_2:.2f} kg")
-                else:
-                    st.write(f"- **{mode1}**: {dist1:.2f} km, CO2: {co2_1:.2f} kg")
+                for seg in route_data['segments']:
+                    st.write(f"- **{seg['mode']}**: {seg['distance']:.2f} km, CO2: {seg['co2']:.2f} kg, Cost: ${seg['cost']:.2f}")
+                st.write(f"**Delivery Time**: {delivery_time:.2f} days")
             with tab2:
                 import plotly.express as px
                 fig = px.bar(
-                    x=[current_co2, min_co2],
-                    y=['Current Route', 'Optimized Route'],
+                    x=[emissions.calculate_co2('Truck', distance_km, weight_tons), min_co2],
+                    y=['Current Truck Route', 'Optimized Route'],
                     title="CO2 Emissions Comparison",
                     labels={'x': 'CO2 Emissions (kg)', 'y': 'Route'}
                 )
                 st.plotly_chart(fig, use_container_width=True)
             with tab3:
-                import plotly.graph_objects as go
-                fig = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=savings_pct,
-                    title={'text': "CO2 Reduction (%)"},
-                    gauge={'axis': {'range': [0, 100]}, 'bar': {'color': "#36A2EB"}}
-                ))
+                import plotly.express as px
+                fig = px.pie(
+                    values=[seg['co2'] for seg in route_data['segments']],
+                    names=[seg['mode'] for seg in route_data['segments']],
+                    title="CO2 Contribution by Mode"
+                )
                 st.plotly_chart(fig, use_container_width=True)
         except ValueError as e:
             ui.show_error(str(e), f"Cannot optimize route: {str(e)}.")
 
 def page_green_warehousing():
     st.header("Green Warehousing Analysis")
-    # Session state defaults
     if 'warehouse_size_m2' not in st.session_state:
         st.session_state.warehouse_size_m2 = 1000.0
     if 'led_percentage' not in st.session_state:
@@ -815,13 +848,12 @@ def page_green_warehousing():
             st.session_state.warehouse_size_m2 = 1000.0
             st.session_state.led_percentage = 0.5
             st.session_state.solar_percentage = 0.3
-            st.experimental_rerun()
+            st.rerun()
 
 def page_sustainable_packaging():
     st.header("Sustainable Packaging Analysis")
     PACKAGING_EMISSIONS = CONFIG['packaging_emissions']
     PACKAGING_COSTS = CONFIG['packaging_costs']
-    # Session state defaults
     if 'material_type' not in st.session_state:
         st.session_state.material_type = 'Plastic'
     if 'weight_kg' not in st.session_state:
@@ -893,11 +925,10 @@ def page_sustainable_packaging():
         if st.button("Reset Inputs"):
             st.session_state.material_type = 'Plastic'
             st.session_state.weight_kg = 1.0
-            st.experimental_rerun()
+            st.rerun()
 
 def page_efficient_load_management():
     st.header("Efficient Load Management")
-    # Session state defaults
     if 'weight_tons' not in st.session_state:
         st.session_state.weight_tons = 10.0
     if 'vehicle_capacity_tons' not in st.session_state:
@@ -974,11 +1005,10 @@ def page_efficient_load_management():
             st.session_state.weight_tons = 10.0
             st.session_state.vehicle_capacity_tons = 20.0
             st.session_state.avg_trip_distance_km = 100.0
-            st.experimental_rerun()
+            st.rerun()
 
 def page_energy_conservation():
     st.header("Energy Conservation Analysis")
-    # Session state defaults
     if 'facility_size_m2' not in st.session_state:
         st.session_state.facility_size_m2 = 1000.0
     if 'smart_system_usage' not in st.session_state:
@@ -1015,7 +1045,7 @@ def page_energy_conservation():
             st.metric("Cost Savings (USD)", f"{cost_savings:.2f}")
             st.metric("Household Equivalent", f"{int(household_equivalent)} households")
         except ValueError as e:
-            ui.show_error(str(e), f"Calculation failed: {str(e)}.")
+            ui.show_error(str(e), f"Calculation failed: {str(e)}.)
     col_btn1, col_btn2 = st.columns([1, 1])
     with col_btn1:
         if st.button("Analyze Energy Savings"):
@@ -1044,34 +1074,30 @@ def page_energy_conservation():
         if st.button("Reset Inputs"):
             st.session_state.facility_size_m2 = 1000.0
             st.session_state.smart_system_usage = 0.5
-            st.experimental_rerun()
+            st.rerun()
 
 def main():
-    """Main application entry point."""
     initialize_page()
-    
     st.title("CO2 Emission Calculator & Sustainability Analytics")
-
-    # Sidebar navigation with caching
+    
     @st.cache_data(ttl=3600)
     def get_available_pages():
         return {
-        "Calculate Emissions": page_calculate_emissions,
-        "Route Visualizer": page_route_visualizer,
-        "Supplier Lookup": page_supplier_lookup,
-        "Reports": page_reports,
-        "Optimized Route Planning": page_optimized_route_planning,
-        "Green Warehousing": page_green_warehousing,
-        "Sustainable Packaging": page_sustainable_packaging,
-        "Efficient Load Management": page_efficient_load_management,
-        "Energy Conservation": page_energy_conservation,
-    }
+            "Calculate Emissions": page_calculate_emissions,
+            "Route Visualizer": page_route_visualizer,
+            "Supplier Lookup": page_supplier_lookup,
+            "Reports": page_reports,
+            "Optimized Route Planning": page_optimized_route_planning,
+            "Green Warehousing": page_green_warehousing,
+            "Sustainable Packaging": page_sustainable_packaging,
+            "Efficient Load Management": page_efficient_load_management,
+            "Energy Conservation": page_energy_conservation,
+        }
     
     pages = get_available_pages()
     page = st.sidebar.selectbox("Select a page", list(pages.keys()))
     
     try:
-        # Call the selected page function with error handling
         pages[page]()
     except Exception as e:
         logger.error(f"Error in page {page}: {e}")
