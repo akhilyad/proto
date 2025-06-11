@@ -350,9 +350,13 @@ def _get_coordinates_from_config(country: str, city: str):
     """
     try:
         loc = CONFIG['locations'][country][city]
-        return float(loc['lat']), float(loc['lon'])
+        if isinstance(loc, (list, tuple)) and len(loc) == 2:
+            return float(loc[0]), float(loc[1])  # Extract lat, lon from list
+        raise ValueError(f"Invalid coordinate format for {city}, {country}: expected [lat, lon]")
     except KeyError:
         return None
+    except (IndexError, ValueError) as e:
+        raise ValueError(f"Error parsing coordinates for {city}, {country}: {str(e)}")
 
 def geocode_location(city, country):
     url = "https://nominatim.openstreetmap.org/search"
