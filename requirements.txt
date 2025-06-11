@@ -1,3 +1,5 @@
+
+scipy
 geopy
 pip>=23.0
 setuptools>=65.0.0
