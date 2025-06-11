@@ -3,6 +3,7 @@ from typing import Tuple, Optional, Dict, Any
 import yaml
 import random
 import os
+import logging
 
 # Load config
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -304,11 +305,34 @@ def calculate_full_logistics_cost(
     Calculate all logistics and carbon costs for air or multi-modal (sea+rail) shipping.
     Returns a dictionary with all relevant metrics.
     """
-    # Load parameters
-    ef = CONFIG['emission_factors']
-    costs = CONFIG['costs']
-    lead_times = CONFIG['lead_times']
-    carbon_price = CONFIG['carbon_price_usd_per_ton']
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Load parameters with defaults
+    ef = CONFIG.get('emission_factors', {
+        'Air': 0.9,
+        'Sea': 0.01,
+        'Rail': 0.03
+    })
+    costs = CONFIG.get('costs', {
+        'air_freight_per_kg': 2.5,
+        'sea_freight_per_teu': 1000.0,
+        'rail_freight_per_kg': 0.1,
+        'inventory_value': 100000.0,
+        'inventory_holding_rate': 0.2,
+        'logistics_time_per_day': 500.0
+    })
+    lead_times = CONFIG.get('lead_times', {
+        'air_days': 2.0,
+        'multi_modal_days': 10.0
+    })
+    try:
+        carbon_price_usd = CONFIG['carbon_price_usd_per_ton']
+    except KeyError:
+        logger.warning("Key 'carbon_price_usd_per_ton' not found. Deriving from EUR price.")
+        carbon_price_eur = CONFIG.get('carbon_price_eur_per_ton', 50.0)
+        carbon_price_usd = carbon_price_eur * CONFIG.get('exchange_rates', {}).get('USD', 1.1)
+
     inventory_value = costs['inventory_value']
     holding_rate = costs['inventory_holding_rate']
     time_cost_per_day = costs['logistics_time_per_day']
@@ -343,7 +367,7 @@ def calculate_full_logistics_cost(
     # Total financial cost
     total_financial_cost = direct_cost + total_lead_time_cost
     # Carbon cost
-    carbon_cost = co2_tons * carbon_price
+    carbon_cost = co2_tons * carbon_price_usd
 
     return {
         'co2_tons': co2_tons,
