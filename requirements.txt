@@ -1,4 +1,4 @@
-
+psycopg2-binary
 scipy
 geopy
 pip>=23.0
