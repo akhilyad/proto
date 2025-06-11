@@ -1045,7 +1045,7 @@ def page_energy_conservation():
             st.metric("Cost Savings (USD)", f"{cost_savings:.2f}")
             st.metric("Household Equivalent", f"{int(household_equivalent)} households")
         except ValueError as e:
-            ui.show_error(str(e), f"Calculation failed: {str(e)}.)
+            ui.show_error(str(e), f"Calculation failed: {str(e)}")
     col_btn1, col_btn2 = st.columns([1, 1])
     with col_btn1:
         if st.button("Analyze Energy Savings"):
@@ -1069,7 +1069,7 @@ def page_energy_conservation():
                     )
                     st.plotly_chart(fig, use_container_width=True)
             except ValueError as e:
-                ui.show_error(str(e), f"Visualization failed: {str(e)}.")
+                ui.show_error(str(e), f"Visualization failed: {str(e)}")
     with col_btn2:
         if st.button("Reset Inputs"):
             st.session_state.facility_size_m2 = 1000.0
