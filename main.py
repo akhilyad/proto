@@ -71,37 +71,24 @@ def with_spinner(func):
     return wrapper
 
 @with_spinner
-def calculate_emissions_with_progress(source_country, source_city, dest_country, dest_city, weight_tons):
-    """Calculate emissions with progress indicator."""
+def calculate_emissions_with_progress(source_country, source_city, dest_country, dest_city, weight_tons, transport_mode):
     progress_bar = st.progress(0)
-    
     try:
-        # Calculate distance
         progress_bar.progress(25)
         distance_km = emissions.calculate_distance(
             source_country, source_city, dest_country, dest_city,
             get_coords_func=db.get_coordinates
         )
-        
-        # Calculate CO2
         progress_bar.progress(50)
-        co2_kg = emissions.calculate_co2('Truck', distance_km, weight_tons)
-        
-        # Calculate additional metrics
-        progress_bar.progress(75)
-        carbon_cost_eur = co2_kg / 1000 * CONFIG['carbon_price_eur_per_ton']
-        trees_equivalent = co2_kg * 0.04
-        
-        progress_bar.progress(100)
-        return {
-            'distance_km': distance_km,
-            'co2_kg': co2_kg,
-            'carbon_cost_eur': carbon_cost_eur,
-            'trees_equivalent': trees_equivalent
-        }
+        co2_kg = emissions.calculate_co2(transport_mode, distance_km, weight_tons)
+        carbon_cost_eur = co2_kg * (CONFIG['carbon_price_eur_per_ton'] / 1000)  # Convert kg to tons
+        trees_offset = int(co2_kg / 25)  # Assuming 25 kg CO2 per tree
+        # Save emission (will fall back if no database)
+        db.save_emission(source_country, source_city, dest_country, dest_city, transport_mode, weight_tons, co2_kg, distance_km, carbon_cost_eur, trees_offset)
+        # ... (rest of the function, e.g., display results)
     except Exception as e:
-        logger.error(f"Error calculating emissions: {e}")
-        raise
+        logger.error(f"Error in emissions calculation: {e}")
+        st.error(f"An error occurred: {e}")
     finally:
         progress_bar.empty()
 
