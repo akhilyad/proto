@@ -369,10 +369,6 @@ def geocode_location(city, country):
         return float(data["lat"]), float(data["lon"])
     return None
 
-import psycopg2
-import os
-from emissions import CONFIG  # Ensure CONFIG is imported
-
 def get_coordinates(country: str, city: str) -> tuple:
     try:
         conn = psycopg2.connect(os.environ['DATABASE_URL'])
@@ -382,10 +378,6 @@ def get_coordinates(country: str, city: str) -> tuple:
         conn.close()
         if result:
             return float(result[0]), float(result[1])
-    except (psycopg2.Error, KeyError) as e:
-        print(f"Database error or env var missing: {e}. Falling back to config.")
-        # Fallback to config
-        loc = CONFIG['locations'].get(country, {}).get(city)
-        if loc and isinstance(loc, (list, tuple)) and len(loc) == 2:
-            return float(loc[0]), float(loc[1])
+    except psycopg2.Error as e:
+        raise Exception("No database connections available")
     return None
