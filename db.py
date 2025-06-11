@@ -12,8 +12,6 @@ import threading
 from queue import Queue, Empty, Full
 import time
 import requests
-import psycopg2
-from emissions import CONFIG
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -150,6 +148,14 @@ def init_db():
             c = conn.cursor()
             # Create tables with proper constraints and indexes
             c.executescript("""
+                CREATE TABLE IF NOT EXISTS coordinates (
+                    country VARCHAR(50),
+                    city VARCHAR(50),
+                    latitude FLOAT,
+                    longitude FLOAT,
+                    PRIMARY KEY (country, city)
+                );
+                
                 CREATE TABLE IF NOT EXISTS emissions (
                     id TEXT PRIMARY KEY,
                     source TEXT NOT NULL,
@@ -218,7 +224,14 @@ def init_db():
                 END;
             """)
             conn.commit()
-            logging.info("Database initialized successfully")
+            # Populate coordinates from config
+            for country, cities in CONFIG['locations'].items():
+                for city, coords in cities.items():
+                    if isinstance(coords, (list, tuple)) and len(coords) == 2:
+                        c.execute("INSERT OR REPLACE INTO coordinates (country, city, latitude, longitude) VALUES (?, ?, ?, ?)",
+                                  (country, city, float(coords[0]), float(coords[1])))
+            conn.commit()
+            logger.info("Database initialized successfully")
         # Insert sample suppliers if needed
         insert_sample_suppliers()
     except sqlite3.Error as e:
@@ -273,13 +286,13 @@ def save_packaging(material_type: str, weight_kg: float, co2_kg: float) -> None:
     except sqlite3.Error as e:
         logging.error(f"Failed to save packaging: {e}")
 
-def save_offset(project_type: str, co2_offset_tons: float, cost_usd: float) -> None:
+def save_offset(project_type: str, co2_offset_tons: float, cost_eur: float) -> None:
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
             offset_id = str(uuid.uuid4())
-            c.execute('INSERT INTO offsets (id, project_type, co2_offset_tons, cost_usd) VALUES (?, ?, ?, ?)',
-                      (offset_id, project_type, co2_offset_tons, cost_usd))
+            c.execute('INSERT INTO offsets (id, project_name, co2_kg, cost_eur) VALUES (?, ?, ?, ?)',
+                      (offset_id, project_type, co2_offset_tons, cost_eur))
             conn.commit()
     except sqlite3.Error as e:
         logging.error(f"Failed to save offset: {e}")
@@ -370,14 +383,28 @@ def geocode_location(city, country):
     return None
 
 def get_coordinates(country: str, city: str) -> tuple:
+    """
+    Retrieve coordinates for a given country and city, with fallback to config and geocoding.
+    """
     try:
-        conn = psycopg2.connect(os.environ['DATABASE_URL'])
-        cursor = conn.cursor()
-        cursor.execute("SELECT latitude, longitude FROM coordinates WHERE country = %s AND city = %s", (country, city))
-        result = cursor.fetchone()
-        conn.close()
-        if result:
-            return float(result[0]), float(result[1])
-    except psycopg2.Error as e:
-        raise Exception("No database connections available")
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT latitude, longitude FROM coordinates WHERE country = ? AND city = ?", (country, city))
+            result = c.fetchone()
+            if result:
+                return float(result[0]), float(result[1])
+    except sqlite3.Error as e:
+        logger.error(f"SQLite error: {e}. Falling back to config.")
+    
+    # Fallback to config
+    coords = _get_coordinates_from_config(country, city)
+    if coords:
+        return coords
+    
+    # Last resort: geocode if enabled (optional, disable if not needed)
+    # coords = geocode_location(city, country)
+    # if coords:
+    #     return coords
+    
+    logger.warning(f"No coordinates found for {city}, {country}")
     return None
